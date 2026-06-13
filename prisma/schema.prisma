@@ -1,0 +1,334 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  username      String   @unique
+  password      String
+  realName      String
+  email         String?
+  phone         String?
+  avatar        String?
+  status        Int      @default(1)
+  departmentId  String?
+  department    Department?  @relation(fields: [departmentId], references: [id])
+  roles         UserRole[]
+  permissions   UserPermission[]
+  tempAuths     TempAuthorization[]
+  authRequests  AuthorizationRequest[]
+  approvalRecords ApprovalRecord[]
+  auditLogs     AuditLog[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([username])
+  @@index([departmentId])
+}
+
+model Department {
+  id            String   @id @default(uuid())
+  name          String
+  code          String   @unique
+  parentId      String?
+  parent        Department?  @relation("DepartmentTree", fields: [parentId], references: [id])
+  children      Department[] @relation("DepartmentTree")
+  users         User[]
+  permissions   DepartmentPermission[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([code])
+  @@index([parentId])
+}
+
+model Role {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  code          String   @unique
+  description   String?
+  type          String   @default("custom")
+  status        Int      @default(1)
+  users         UserRole[]
+  permissions   RolePermission[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([code])
+}
+
+model Permission {
+  id            String   @id @default(uuid())
+  name          String
+  code          String   @unique
+  type          String   @default("resource")
+  description   String?
+  status        Int      @default(1)
+  roles         RolePermission[]
+  users         UserPermission[]
+  departmentPerms DepartmentPermission[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([code])
+  @@index([type])
+}
+
+model UserRole {
+  id          String   @id @default(uuid())
+  userId      String
+  roleId      String
+  user        User     @relation(fields: [userId], references: [id])
+  role        Role     @relation(fields: [roleId], references: [id])
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model UserPermission {
+  id            String   @id @default(uuid())
+  userId        String
+  permissionId  String
+  user          User     @relation(fields: [userId], references: [id])
+  permission    Permission @relation(fields: [permissionId], references: [id])
+  source        String   @default("direct")
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, permissionId])
+  @@index([userId])
+  @@index([permissionId])
+}
+
+model DepartmentPermission {
+  id            String   @id @default(uuid())
+  departmentId  String
+  permissionId  String
+  department    Department @relation(fields: [departmentId], references: [id])
+  permission    Permission @relation(fields: [permissionId], references: [id])
+  inherit       Boolean  @default(true)
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  @@unique([departmentId, permissionId])
+  @@index([departmentId])
+  @@index([permissionId])
+}
+
+model RolePermission {
+  id            String   @id @default(uuid())
+  roleId        String
+  permissionId  String
+  role          Role     @relation(fields: [roleId], references: [id])
+  permission    Permission @relation(fields: [permissionId], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model Resource {
+  id            String   @id @default(uuid())
+  name          String
+  code          String   @unique
+  type          String   @default("report")
+  categoryId    String?
+  category      ResourceCategory? @relation(fields: [categoryId], references: [id])
+  description   String?
+  config        String?
+  status        Int      @default(1)
+  ownerId       String?
+  dataPermissions DataPermission[]
+  authRequests  AuthorizationRequest[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([code])
+  @@index([type])
+  @@index([categoryId])
+}
+
+model ResourceCategory {
+  id            String   @id @default(uuid())
+  name          String
+  code          String   @unique
+  parentId      String?
+  parent        ResourceCategory? @relation("ResourceCategoryTree", fields: [parentId], references: [id])
+  children      ResourceCategory[] @relation("ResourceCategoryTree")
+  resources     Resource[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([code])
+  @@index([parentId])
+}
+
+model DataPermission {
+  id            String   @id @default(uuid())
+  resourceId    String
+  resource      Resource @relation(fields: [resourceId], references: [id])
+  targetType    String
+  targetId      String
+  permissionType String  @default("read")
+  rowFilter     String?
+  columnFilter  String?
+  conditions    String?
+  priority      Int      @default(0)
+  expiresAt     DateTime?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([resourceId])
+  @@index([targetType, targetId])
+  @@index([permissionType])
+}
+
+model TempAuthorization {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  resourceCode  String
+  permissionType String  @default("read")
+  reason        String?
+  startTime     DateTime
+  endTime       DateTime
+  status        String   @default("pending")
+  approvalFlowId String?
+  approvalFlow  ApprovalFlow? @relation(fields: [approvalFlowId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([resourceCode])
+  @@index([status])
+}
+
+model AuthorizationRequest {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  resourceCode  String
+  resourceId    String?
+  resource      Resource? @relation(fields: [resourceId], references: [id])
+  requestType   String   @default("access")
+  reason        String?
+  rowFilter     String?
+  columnFilter  String?
+  duration      Int?
+  status        String   @default("pending")
+  approvalFlowId String?
+  approvalFlow  ApprovalFlow? @relation(fields: [approvalFlowId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([resourceCode])
+  @@index([status])
+}
+
+model ApprovalFlow {
+  id            String   @id @default(uuid())
+  name          String
+  type          String   @default("authorization")
+  description   String?
+  status        Int      @default(1)
+  nodes         ApprovalNode[]
+  requests      AuthorizationRequest[]
+  tempAuths     TempAuthorization[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  @@index([type])
+}
+
+model ApprovalNode {
+  id            String   @id @default(uuid())
+  flowId        String
+  flow          ApprovalFlow @relation(fields: [flowId], references: [id])
+  name          String
+  order         Int
+  approverType  String   @default("user")
+  approverIds   String
+  condition     String?
+  records       ApprovalRecord[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([flowId])
+  @@index([order])
+}
+
+model ApprovalRecord {
+  id            String   @id @default(uuid())
+  nodeId        String
+  node          ApprovalNode @relation(fields: [nodeId], references: [id])
+  approverId    String
+  approver      User     @relation(fields: [approverId], references: [id])
+  targetType    String
+  targetId      String
+  action        String
+  comment       String?
+  createdAt     DateTime @default(now())
+
+  @@index([nodeId])
+  @@index([approverId])
+  @@index([targetType, targetId])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+  action        String
+  targetType    String?
+  targetId      String?
+  detail        String?
+  ip            String?
+  userAgent     String?
+  result        String   @default("success")
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
+
+model Alert {
+  id            String   @id @default(uuid())
+  type          String
+  level         String   @default("warning")
+  title         String
+  content       String
+  targetType    String?
+  targetId      String?
+  isRead        Boolean  @default(false)
+  isHandled     Boolean  @default(false)
+  handlerId     String?
+  handleResult   String?
+  createdAt     DateTime @default(now())
+  handledAt     DateTime?
+
+  @@index([type])
+  @@index([level])
+  @@index([isRead])
+  @@index([createdAt])
+}
