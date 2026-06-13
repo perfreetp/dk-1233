@@ -39,12 +39,13 @@ async function getUserPermissions(userId: string): Promise<{
     };
   }
 
+  const now = new Date();
   const directPermissions = user.permissions
-    .filter(up => !up.expiresAt || new Date(up.expiresAt) > new Date())
+    .filter(up => !up.expiresAt || new Date(up.expiresAt) > now)
     .map(up => up.permission.code);
 
   const rolePermissions = user.roles
-    .filter(ur => !ur.expiresAt || new Date(ur.expiresAt) > new Date())
+    .filter(ur => !ur.expiresAt || new Date(ur.expiresAt) > now)
     .flatMap(ur => ur.role.permissions.map(rp => rp.permission.code));
 
   const departmentPermissions: string[] = [];
@@ -56,7 +57,7 @@ async function getUserPermissions(userId: string): Promise<{
         departmentId: user.department.id,
         OR: [
           { expiresAt: null },
-          { expiresAt: { gt: new Date() } }
+          { expiresAt: { gt: now } }
         ]
       },
       include: { permission: true }
@@ -192,7 +193,7 @@ router.get('/users/:userId/resources', authMiddleware, async (req: Request, res:
     });
 
     const accessibleResources: Map<string, {
-      resource: typeof dataPerms[0]['resource'];
+      resource: { id: string; name: string; code: string; type: string; status: number };
       rowFilter: string | null;
       columnFilter: string | null;
       permissionType: string;
@@ -200,6 +201,8 @@ router.get('/users/:userId/resources', authMiddleware, async (req: Request, res:
     }> = new Map();
 
     for (const perm of dataPerms) {
+      if (!perm.resource) continue;
+      
       let hasAccess = false;
       let source = '';
 
@@ -227,9 +230,16 @@ router.get('/users/:userId/resources', authMiddleware, async (req: Request, res:
 
       if (hasAccess && perm.resource) {
         const existing = accessibleResources.get(perm.resource.id);
-        if (!existing || perm.priority > (existing.permissionType === 'admin' ? 100 : 0)) {
+        const existingPriority = existing ? (existing.permissionType === 'admin' ? 100 : 0) : -1;
+        if (!existing || perm.priority > existingPriority) {
           accessibleResources.set(perm.resource.id, {
-            resource: perm.resource,
+            resource: {
+              id: perm.resource.id,
+              name: perm.resource.name,
+              code: perm.resource.code,
+              type: perm.resource.type,
+              status: perm.resource.status
+            },
             rowFilter: perm.rowFilter,
             columnFilter: perm.columnFilter,
             permissionType: perm.permissionType,
@@ -265,7 +275,7 @@ async function getParentDepartmentIds(departmentId: string): Promise<string[]> {
       where: { id: currentId },
       select: { parentId: true }
     });
-    currentId = dept?.parentId;
+    currentId = dept?.parentId || null;
   }
 
   return ids;
@@ -482,19 +492,31 @@ router.post('/check', authMiddleware, async (req: Request, res: Response) => {
     }
 
     if (matchedPerm) {
-      const rowFilter = matchedPerm.rowFilter 
-        ? JSON.parse(matchedPerm.rowFilter) 
-        : null;
-      const columnFilter = matchedPerm.columnFilter 
-        ? JSON.parse(matchedPerm.columnFilter) 
-        : null;
+      let rowFilter: Record<string, unknown> | null = null;
+      let columnFilter: Record<string, unknown> | null = null;
+
+      try {
+        if (matchedPerm.rowFilter) {
+          rowFilter = JSON.parse(matchedPerm.rowFilter);
+        }
+      } catch {
+        rowFilter = null;
+      }
+
+      try {
+        if (matchedPerm.columnFilter) {
+          columnFilter = JSON.parse(matchedPerm.columnFilter);
+        }
+      } catch {
+        columnFilter = null;
+      }
 
       if (data.context && rowFilter) {
         const contextMatch = evaluateFilter(rowFilter, data.context);
         if (!contextMatch) {
           await createAlert('unauthorized_access', 'warning', 
             '越权访问尝试', 
-            `用户 ${user.username} 尝试访问资源 ${resource.code} 但行级权限不匹配`,
+            `用户 ${escapeHtml(user.username)} 尝试访问资源 ${escapeHtml(resource.code)} 但行级权限不匹配`,
             'user', data.userId);
           
           return res.json({
@@ -521,7 +543,7 @@ router.post('/check', authMiddleware, async (req: Request, res: Response) => {
     } else {
       await createAlert('unauthorized_access', 'warning',
         '越权访问尝试',
-        `用户 ${user.username} 尝试访问资源 ${resource.code} 但无权限`,
+        `用户 ${escapeHtml(user.username)} 尝试访问资源 ${escapeHtml(resource.code)} 但无权限`,
         'user', data.userId);
 
       res.json({
@@ -541,6 +563,17 @@ router.post('/check', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
 function evaluateFilter(filter: Record<string, unknown>, context: Record<string, unknown>): boolean {
   for (const [key, value] of Object.entries(filter)) {
     if (context[key] !== value) {
@@ -556,13 +589,12 @@ async function createAlert(type: string, level: string, title: string, content: 
       data: {
         type,
         level,
-        title,
-        content,
+        title: escapeHtml(title),
+        content: escapeHtml(content),
         targetType,
         targetId
       }
     });
-    console.log(`Alert created: ${type} - ${title}`);
   } catch (error) {
     console.error('Failed to create alert:', error);
   }

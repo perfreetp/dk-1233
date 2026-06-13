@@ -6,6 +6,18 @@ import { loginSchema, createUserSchema, updateUserSchema } from '../validators';
 
 const router = Router();
 
+function escapeHtml(text: string | null | undefined): string {
+  if (!text) return '';
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { username, password } = loginSchema.parse(req.body);
@@ -48,14 +60,18 @@ router.post('/login', async (req: Request, res: Response) => {
         user: {
           id: user.id,
           username: user.username,
-          realName: user.realName,
-          email: user.email,
-          phone: user.phone,
-          department: user.department,
+          realName: escapeHtml(user.realName),
+          email: escapeHtml(user.email || ''),
+          phone: user.phone ? '***' + user.phone.slice(-4) : null,
+          department: user.department ? {
+            id: user.department.id,
+            name: escapeHtml(user.department.name),
+            code: escapeHtml(user.department.code)
+          } : null,
           roles: user.roles.map(ur => ({
             id: ur.role.id,
-            name: ur.role.name,
-            code: ur.role.code
+            name: escapeHtml(ur.role.name),
+            code: escapeHtml(ur.role.code)
           }))
         }
       }
@@ -64,8 +80,7 @@ router.post('/login', async (req: Request, res: Response) => {
     console.error('Login error:', error);
     res.status(400).json({
       success: false,
-      message: '登录失败',
-      error: error instanceof Error ? error.message : '未知错误'
+      message: '登录失败'
     });
   }
 });
@@ -97,19 +112,23 @@ router.get('/profile', authMiddleware, async (req: Request, res: Response) => {
       data: {
         id: user.id,
         username: user.username,
-        realName: user.realName,
-        email: user.email,
-        phone: user.phone,
-        department: user.department,
+        realName: escapeHtml(user.realName),
+        email: escapeHtml(user.email || ''),
+        phone: user.phone ? '***' + user.phone.slice(-4) : null,
+        department: user.department ? {
+          id: user.department.id,
+          name: escapeHtml(user.department.name),
+          code: escapeHtml(user.department.code)
+        } : null,
         roles: user.roles.map(ur => ({
           id: ur.role.id,
-          name: ur.role.name,
-          code: ur.role.code,
+          name: escapeHtml(ur.role.name),
+          code: escapeHtml(ur.role.code),
           expiresAt: ur.expiresAt
         })),
         permissions: user.permissions.map(up => ({
           id: up.permission.id,
-          name: up.permission.name,
+          name: escapeHtml(up.permission.name),
           code: up.permission.code,
           type: up.permission.type,
           source: up.source,
@@ -128,15 +147,19 @@ router.get('/profile', authMiddleware, async (req: Request, res: Response) => {
 
 router.get('/users', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const { page = 1, pageSize = 20, keyword, departmentId, status } = req.query;
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 20));
+    const keyword = req.query.keyword as string;
+    const departmentId = req.query.departmentId as string;
+    const status = req.query.status as string;
     
     const where: Record<string, unknown> = { deletedAt: null };
     
     if (keyword) {
       where.OR = [
-        { username: { contains: keyword as string } },
-        { realName: { contains: keyword as string } },
-        { email: { contains: keyword as string } }
+        { username: { contains: keyword } },
+        { realName: { contains: keyword } },
+        { email: { contains: keyword } }
       ];
     }
     
@@ -145,7 +168,7 @@ router.get('/users', authMiddleware, async (req: Request, res: Response) => {
     }
     
     if (status !== undefined) {
-      where.status = Number(status);
+      where.status = parseInt(status);
     }
 
     const [total, users] = await Promise.all([
@@ -158,8 +181,8 @@ router.get('/users', authMiddleware, async (req: Request, res: Response) => {
             include: { role: true }
           }
         },
-        skip: (Number(page) - 1) * Number(pageSize),
-        take: Number(pageSize),
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         orderBy: { createdAt: 'desc' }
       })
     ]);
@@ -168,17 +191,25 @@ router.get('/users', authMiddleware, async (req: Request, res: Response) => {
       success: true,
       data: {
         total,
-        page: Number(page),
-        pageSize: Number(pageSize),
+        page,
+        pageSize,
         list: users.map(u => ({
           id: u.id,
           username: u.username,
-          realName: u.realName,
-          email: u.email,
-          phone: u.phone,
+          realName: escapeHtml(u.realName),
+          email: escapeHtml(u.email || ''),
+          phone: u.phone ? '***' + u.phone.slice(-4) : null,
           status: u.status,
-          department: u.department,
-          roles: u.roles.map(r => r.role),
+          department: u.department ? {
+            id: u.department.id,
+            name: escapeHtml(u.department.name),
+            code: escapeHtml(u.department.code)
+          } : null,
+          roles: u.roles.map(r => ({
+            id: r.role.id,
+            name: escapeHtml(r.role.name),
+            code: escapeHtml(r.role.code)
+          })),
           createdAt: u.createdAt,
           updatedAt: u.updatedAt
         }))
@@ -224,17 +255,15 @@ router.post('/users', authMiddleware, async (req: Request, res: Response) => {
       data: {
         id: user.id,
         username: user.username,
-        realName: user.realName,
-        email: user.email,
-        phone: user.phone
+        realName: escapeHtml(user.realName),
+        email: escapeHtml(user.email || '')
       }
     });
   } catch (error) {
     console.error('Create user error:', error);
     res.status(400).json({
       success: false,
-      message: '创建用户失败',
-      error: error instanceof Error ? error.message : '未知错误'
+      message: '创建用户失败'
     });
   }
 });
@@ -244,6 +273,14 @@ router.put('/users/:id', authMiddleware, async (req: Request, res: Response) => 
     const { id } = req.params;
     const data = updateUserSchema.parse(req.body);
 
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+
     const user = await prisma.user.update({
       where: { id },
       data
@@ -251,14 +288,19 @@ router.put('/users/:id', authMiddleware, async (req: Request, res: Response) => 
 
     res.json({
       success: true,
-      data: user
+      data: {
+        id: user.id,
+        username: user.username,
+        realName: escapeHtml(user.realName),
+        email: escapeHtml(user.email || ''),
+        status: user.status
+      }
     });
   } catch (error) {
     console.error('Update user error:', error);
     res.status(400).json({
       success: false,
-      message: '更新用户失败',
-      error: error instanceof Error ? error.message : '未知错误'
+      message: '更新用户失败'
     });
   }
 });
@@ -266,6 +308,16 @@ router.put('/users/:id', authMiddleware, async (req: Request, res: Response) => 
 router.delete('/users/:id', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+
+    const existing = await prisma.user.findUnique({ 
+      where: { id, deletedAt: null } 
+    });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
 
     await prisma.user.update({
       where: { id },
@@ -297,8 +349,24 @@ router.post('/users/:id/roles', authMiddleware, async (req: Request, res: Respon
       });
     }
 
+    const user = await prisma.user.findUnique({ where: { id, deletedAt: null } });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+
+    const validRoleIds = roleIds.filter((id: string) => typeof id === 'string' && id.length > 0);
+    if (validRoleIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'roleIds 不能为空'
+      });
+    }
+
     await prisma.$transaction(
-      roleIds.map(roleId => 
+      validRoleIds.map(roleId => 
         prisma.userRole.upsert({
           where: { userId_roleId: { userId: id, roleId } },
           create: {
@@ -338,8 +406,24 @@ router.post('/users/:id/permissions', authMiddleware, async (req: Request, res: 
       });
     }
 
+    const user = await prisma.user.findUnique({ where: { id, deletedAt: null } });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+
+    const validPermissionIds = permissionIds.filter((id: string) => typeof id === 'string' && id.length > 0);
+    if (validPermissionIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'permissionIds 不能为空'
+      });
+    }
+
     await prisma.$transaction(
-      permissionIds.map(permissionId =>
+      validPermissionIds.map(permissionId =>
         prisma.userPermission.upsert({
           where: { userId_permissionId: { userId: id, permissionId } },
           create: {
