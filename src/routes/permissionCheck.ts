@@ -178,17 +178,27 @@ router.get('/users/:userId/resources', authMiddleware, async (req: Request, res:
       });
     }
 
+    const now = new Date();
     const dataPerms = await prisma.dataPermission.findMany({
       where: {
         deletedAt: null,
         OR: [
           { expiresAt: null },
-          { expiresAt: { gt: new Date() } }
+          { expiresAt: { gt: now } }
         ],
         permissionType: { in: [permissionType as string, 'admin'] }
       },
       include: {
         resource: true
+      }
+    });
+
+    const tempAuths = await prisma.tempAuthorization.findMany({
+      where: {
+        userId,
+        status: 'approved',
+        startTime: { lte: now },
+        endTime: { gt: now }
       }
     });
 
@@ -198,6 +208,9 @@ router.get('/users/:userId/resources', authMiddleware, async (req: Request, res:
       columnFilter: string | null;
       permissionType: string;
       source: string;
+      startTime?: Date;
+      endTime?: Date;
+      isTempAuth?: boolean;
     }> = new Map();
 
     for (const perm of dataPerms) {
@@ -246,6 +259,30 @@ router.get('/users/:userId/resources', authMiddleware, async (req: Request, res:
             source
           });
         }
+      }
+    }
+
+    for (const tempAuth of tempAuths) {
+      const resource = await prisma.resource.findUnique({
+        where: { code: tempAuth.resourceCode }
+      });
+      if (resource && !accessibleResources.has(resource.id)) {
+        accessibleResources.set(resource.id, {
+          resource: {
+            id: resource.id,
+            name: resource.name,
+            code: resource.code,
+            type: resource.type,
+            status: resource.status
+          },
+          rowFilter: null,
+          columnFilter: null,
+          permissionType: tempAuth.permissionType,
+          source: 'temp_auth',
+          startTime: tempAuth.startTime,
+          endTime: tempAuth.endTime,
+          isTempAuth: true
+        });
       }
     }
 
@@ -397,7 +434,18 @@ router.get('/resources/:resourceCode/accessors', authMiddleware, async (req: Req
 
 router.post('/check', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const data = checkPermissionSchema.parse(req.body);
+    const parseResult = checkPermissionSchema.safeParse(req.body);
+    
+    if (!parseResult.success) {
+      const errors = parseResult.error.errors.map(e => e.message).join(', ');
+      return res.status(400).json({
+        success: false,
+        message: '参数验证失败',
+        errors
+      });
+    }
+    
+    const data = parseResult.data;
     
     const resource = await prisma.resource.findUnique({
       where: { code: data.resourceCode }
@@ -431,20 +479,32 @@ router.post('/check', authMiddleware, async (req: Request, res: Response) => {
       });
     }
 
+    const now = new Date();
     const dataPerms = await prisma.dataPermission.findMany({
       where: {
         resourceId: resource.id,
         deletedAt: null,
         OR: [
           { expiresAt: null },
-          { expiresAt: { gt: new Date() } }
+          { expiresAt: { gt: now } }
         ]
       },
       orderBy: { priority: 'desc' }
     });
 
+    const tempAuth = await prisma.tempAuthorization.findFirst({
+      where: {
+        userId: data.userId,
+        resourceCode: data.resourceCode,
+        status: 'approved',
+        startTime: { lte: now },
+        endTime: { gt: now }
+      }
+    });
+
     let matchedPerm: typeof dataPerms[0] | null = null;
     let matchSource = '';
+    let isTempAuth = false;
 
     for (const perm of dataPerms) {
       const requiredTypes = [data.permissionType];
@@ -541,18 +601,80 @@ router.post('/check', authMiddleware, async (req: Request, res: Response) => {
         }
       });
     } else {
-      await createAlert('unauthorized_access', 'warning',
-        '越权访问尝试',
-        `用户 ${escapeHtml(user.username)} 尝试访问资源 ${escapeHtml(resource.code)} 但无权限`,
-        'user', data.userId);
-
-      res.json({
-        success: true,
-        data: {
-          allowed: false,
-          reason: '无访问权限'
+      if (tempAuth) {
+        if (data.permissionType !== 'admin' && tempAuth.permissionType === 'admin') {
+          res.json({
+            success: true,
+            data: {
+              allowed: true,
+              permissionType: tempAuth.permissionType,
+              source: 'temp_auth',
+              rowFilter: null,
+              columnFilter: null,
+              expiresAt: tempAuth.endTime,
+              startTime: tempAuth.startTime,
+              isTempAuth: true
+            }
+          });
+        } else {
+          res.json({
+            success: true,
+            data: {
+              allowed: false,
+              reason: '临时授权权限级别不足'
+            }
+          });
         }
-      });
+      } else {
+        const pendingTempAuth = await prisma.tempAuthorization.findFirst({
+          where: {
+            userId: data.userId,
+            resourceCode: data.resourceCode,
+            status: 'pending'
+          }
+        });
+
+        if (pendingTempAuth) {
+          if (now < pendingTempAuth.startTime) {
+            res.json({
+              success: true,
+              data: {
+                allowed: false,
+                reason: `临时授权尚未开始，开始时间：${pendingTempAuth.startTime.toLocaleString()}`
+              }
+            });
+          } else if (now > pendingTempAuth.endTime) {
+            res.json({
+              success: true,
+              data: {
+                allowed: false,
+                reason: '临时授权已过期'
+              }
+            });
+          } else {
+            res.json({
+              success: true,
+              data: {
+                allowed: false,
+                reason: '临时授权待审批'
+              }
+            });
+          }
+        } else {
+          await createAlert('unauthorized_access', 'warning',
+            '越权访问尝试',
+            `用户 ${escapeHtml(user.username)} 尝试访问资源 ${escapeHtml(resource.code)} 但无权限`,
+            'user', data.userId);
+
+          res.json({
+            success: true,
+            data: {
+              allowed: false,
+              reason: '无访问权限'
+            }
+          });
+        }
+      }
     }
   } catch (error) {
     console.error('Check permission error:', error);

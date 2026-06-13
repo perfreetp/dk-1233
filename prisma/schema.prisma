@@ -210,6 +210,8 @@ model TempAuthorization {
   startTime     DateTime
   endTime       DateTime
   status        String   @default("pending")
+  currentNodeId String?
+  currentNode   ApprovalNode? @relation(fields: [currentNodeId], references: [id])
   approvalFlowId String?
   approvalFlow  ApprovalFlow? @relation(fields: [approvalFlowId], references: [id])
   createdAt     DateTime @default(now())
@@ -234,6 +236,8 @@ model AuthorizationRequest {
   columnFilter  String?
   duration      Int?
   status        String   @default("pending")
+  currentNodeId String?
+  currentNode   ApprovalNode? @relation(fields: [currentNodeId], references: [id])
   approvalFlowId String?
   approvalFlow  ApprovalFlow? @relation(fields: [approvalFlowId], references: [id])
   createdAt     DateTime @default(now())
@@ -270,6 +274,8 @@ model ApprovalNode {
   approverIds   String
   condition     String?
   records       ApprovalRecord[]
+  currentAuthRequests AuthorizationRequest[]
+  currentTempAuths TempAuthorization[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

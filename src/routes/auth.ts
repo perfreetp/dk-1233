@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { hashPassword, comparePassword, generateToken } from '../middleware/auth';
+import { hashPassword, comparePassword, generateToken, roleMiddleware } from '../middleware/auth';
 import { authMiddleware } from '../middleware/auth';
 import { loginSchema, createUserSchema, updateUserSchema } from '../validators';
 
@@ -17,6 +17,8 @@ function escapeHtml(text: string | null | undefined): string {
   };
   return text.replace(/[&<>"']/g, m => map[m]);
 }
+
+const adminOnly = roleMiddleware('admin');
 
 router.post('/login', async (req: Request, res: Response) => {
   try {
@@ -224,7 +226,7 @@ router.get('/users', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/users', authMiddleware, async (req: Request, res: Response) => {
+router.post('/users', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const data = createUserSchema.parse(req.body);
     
@@ -268,7 +270,7 @@ router.post('/users', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-router.put('/users/:id', authMiddleware, async (req: Request, res: Response) => {
+router.put('/users/:id', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const data = updateUserSchema.parse(req.body);
@@ -305,7 +307,7 @@ router.put('/users/:id', authMiddleware, async (req: Request, res: Response) => 
   }
 });
 
-router.delete('/users/:id', authMiddleware, async (req: Request, res: Response) => {
+router.delete('/users/:id', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -337,7 +339,7 @@ router.delete('/users/:id', authMiddleware, async (req: Request, res: Response) 
   }
 });
 
-router.post('/users/:id/roles', authMiddleware, async (req: Request, res: Response) => {
+router.post('/users/:id/roles', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { roleIds, expiresAt } = req.body;

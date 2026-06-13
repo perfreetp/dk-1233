@@ -113,8 +113,10 @@ export const batchPermissionSchema = z.object({
 });
 
 export const checkPermissionSchema = z.object({
-  userId: z.string().uuid(),
-  resourceCode: z.string(),
-  permissionType: z.enum(['read', 'write', 'admin']).default('read'),
+  userId: z.string().min(1, '用户ID不能为空').uuid('用户ID格式不正确'),
+  resourceCode: z.string().min(1, '资源编码不能为空'),
+  permissionType: z.enum(['read', 'write', 'admin'], {
+    errorMap: () => ({ message: '权限类型必须是 read、write 或 admin' })
+  }).default('read'),
   context: z.record(z.unknown()).optional()
 });
