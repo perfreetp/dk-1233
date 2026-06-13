@@ -93,6 +93,7 @@ export const createTempAuthSchema = z.object({
 export const createAuthRequestSchema = z.object({
   resourceCode: z.string().min(1),
   requestType: z.enum(['access', 'temp', 'permanent']).default('access'),
+  permissionType: z.enum(['read', 'write', 'admin']).default('read'),
   reason: z.string().max(1000).optional(),
   rowFilter: z.string().optional(),
   columnFilter: z.string().optional(),

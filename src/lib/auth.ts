@@ -29,3 +29,5 @@ export function verifyToken(token: string): JwtPayload | null {
     return null;
   }
 }
+
+export { JWT_SECRET, JWT_EXPIRES_IN };

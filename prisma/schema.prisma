@@ -228,6 +228,7 @@ model AuthorizationRequest {
   resourceId    String?
   resource      Resource? @relation(fields: [resourceId], references: [id])
   requestType   String   @default("access")
+  permissionType String  @default("read")
   reason        String?
   rowFilter     String?
   columnFilter  String?

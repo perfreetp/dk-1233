@@ -551,16 +551,21 @@ function evaluateFilter(filter: Record<string, unknown>, context: Record<string,
 }
 
 async function createAlert(type: string, level: string, title: string, content: string, targetType: string, targetId: string) {
-  await prisma.alert.create({
-    data: {
-      type,
-      level,
-      title,
-      content,
-      targetType,
-      targetId
-    }
-  });
+  try {
+    await prisma.alert.create({
+      data: {
+        type,
+        level,
+        title,
+        content,
+        targetType,
+        targetId
+      }
+    });
+    console.log(`Alert created: ${type} - ${title}`);
+  } catch (error) {
+    console.error('Failed to create alert:', error);
+  }
 }
 
 export default router;

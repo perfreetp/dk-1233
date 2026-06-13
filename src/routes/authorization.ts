@@ -198,6 +198,7 @@ router.post('/auth-requests', authMiddleware, async (req: Request, res: Response
         resourceCode: data.resourceCode,
         resourceId: resource.id,
         requestType: data.requestType,
+        permissionType: data.permissionType,
         reason: data.reason,
         rowFilter: data.rowFilter,
         columnFilter: data.columnFilter,
@@ -253,16 +254,20 @@ router.post('/auth-requests/:id/approve', authMiddleware, async (req: Request, r
 
     if (data.action === 'approve') {
       if (authRequest.resource) {
-        const expiresAt = authRequest.duration 
+        let expiresAt = authRequest.duration 
           ? new Date(Date.now() + authRequest.duration * 1000)
           : null;
+        
+        if (authRequest.requestType === 'permanent') {
+          expiresAt = null;
+        }
 
         await prisma.dataPermission.create({
           data: {
             resourceId: authRequest.resource.id,
             targetType: 'user',
             targetId: authRequest.userId,
-            permissionType: 'read',
+            permissionType: authRequest.permissionType,
             rowFilter: authRequest.rowFilter,
             columnFilter: authRequest.columnFilter,
             expiresAt,
@@ -316,6 +321,102 @@ router.post('/auth-requests/:id/approve', authMiddleware, async (req: Request, r
     res.status(400).json({
       success: false,
       message: '处理授权申请失败',
+      error: error instanceof Error ? error.message : '未知错误'
+    });
+  }
+});
+
+router.post('/temp-auths/:id/approve', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const data = approvalActionSchema.parse(req.body);
+    
+    const tempAuth = await prisma.tempAuthorization.findUnique({
+      where: { id },
+      include: {
+        approvalFlow: {
+          include: { nodes: { orderBy: { order: 'asc' } } }
+        }
+      }
+    });
+
+    if (!tempAuth) {
+      return res.status(404).json({
+        success: false,
+        message: '临时授权不存在'
+      });
+    }
+
+    if (tempAuth.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: '该申请已处理'
+      });
+    }
+
+    if (data.action === 'approve') {
+      const resource = await prisma.resource.findUnique({
+        where: { code: tempAuth.resourceCode }
+      });
+
+      if (resource) {
+        await prisma.dataPermission.create({
+          data: {
+            resourceId: resource.id,
+            targetType: 'user',
+            targetId: tempAuth.userId,
+            permissionType: tempAuth.permissionType,
+            expiresAt: tempAuth.endTime,
+            createdBy: req.user!.userId
+          }
+        });
+      }
+
+      await prisma.tempAuthorization.update({
+        where: { id },
+        data: { status: 'approved' }
+      });
+
+      await prisma.alert.create({
+        data: {
+          type: 'approval',
+          level: 'info',
+          title: '临时授权已通过',
+          content: `用户 ${tempAuth.userId} 对资源 ${tempAuth.resourceCode} 的临时授权已通过审批`,
+          targetType: 'temp_auth',
+          targetId: id
+        }
+      });
+    } else {
+      await prisma.tempAuthorization.update({
+        where: { id },
+        data: { status: 'rejected' }
+      });
+    }
+
+    if (tempAuth.approvalFlow?.nodes.length > 0) {
+      const currentNode = tempAuth.approvalFlow.nodes[0];
+      await prisma.approvalRecord.create({
+        data: {
+          nodeId: currentNode.id,
+          approverId: req.user!.userId,
+          targetType: 'temp_auth',
+          targetId: id,
+          action: data.action,
+          comment: data.comment
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      message: data.action === 'approve' ? '临时授权已通过' : '临时授权已拒绝'
+    });
+  } catch (error) {
+    console.error('Approve temp auth error:', error);
+    res.status(400).json({
+      success: false,
+      message: '处理临时授权失败',
       error: error instanceof Error ? error.message : '未知错误'
     });
   }

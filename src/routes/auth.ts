@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { hashPassword, comparePassword, generateToken } from '../lib/auth';
+import { hashPassword, comparePassword, generateToken } from '../middleware/auth';
 import { authMiddleware } from '../middleware/auth';
 import { loginSchema, createUserSchema, updateUserSchema } from '../validators';
 
