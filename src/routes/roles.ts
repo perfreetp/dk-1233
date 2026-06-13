@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, roleMiddleware } from '../middleware/auth';
 import { createRoleSchema, updateRoleSchema, createPermissionSchema } from '../validators';
 
 const router = Router();
+
+const adminOnly = roleMiddleware('admin');
 
 router.get('/roles', authMiddleware, async (req: Request, res: Response) => {
   try {
@@ -123,7 +125,7 @@ router.get('/roles/:id', authMiddleware, async (req: Request, res: Response) => 
   }
 });
 
-router.post('/roles', authMiddleware, async (req: Request, res: Response) => {
+router.post('/roles', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const data = createRoleSchema.parse(req.body);
     
@@ -166,7 +168,7 @@ router.post('/roles', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-router.put('/roles/:id', authMiddleware, async (req: Request, res: Response) => {
+router.put('/roles/:id', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const data = updateRoleSchema.parse(req.body);
@@ -216,7 +218,7 @@ router.delete('/roles/:id', authMiddleware, async (req: Request, res: Response) 
   }
 });
 
-router.post('/roles/:id/permissions', authMiddleware, async (req: Request, res: Response) => {
+router.post('/roles/:id/permissions', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { permissionIds } = req.body;
@@ -323,7 +325,7 @@ router.post('/permissions', authMiddleware, async (req: Request, res: Response) 
   }
 });
 
-router.delete('/permissions/:id', authMiddleware, async (req: Request, res: Response) => {
+router.delete('/permissions/:id', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

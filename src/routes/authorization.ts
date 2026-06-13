@@ -5,6 +5,55 @@ import { createTempAuthSchema, createAuthRequestSchema, approvalActionSchema } f
 
 const router = Router();
 
+async function canApproveNode(userId: string, nodeId: string | null): Promise<{ allowed: boolean; reason?: string }> {
+  if (!nodeId) {
+    return { allowed: false, reason: '当前没有待审批节点' };
+  }
+
+  const node = await prisma.approvalNode.findUnique({
+    where: { id: nodeId },
+    include: {
+      flow: true
+    }
+  });
+
+  if (!node) {
+    return { allowed: false, reason: '审批节点不存在' };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      roles: { include: { role: true } }
+    }
+  });
+
+  if (!user) {
+    return { allowed: false, reason: '用户不存在' };
+  }
+
+  let approverIds: string[] = [];
+  try {
+    approverIds = JSON.parse(node.approverIds);
+  } catch {
+    approverIds = [];
+  }
+
+  if (node.approverType === 'user') {
+    if (!approverIds.includes(userId)) {
+      return { allowed: false, reason: '您没有权限审批此节点' };
+    }
+  } else if (node.approverType === 'role') {
+    const userRoleIds = user.roles.map(r => r.roleId);
+    const hasRequiredRole = approverIds.some(id => userRoleIds.includes(id));
+    if (!hasRequiredRole) {
+      return { allowed: false, reason: '您没有此节点要求的角色权限' };
+    }
+  }
+
+  return { allowed: true };
+}
+
 router.get('/temp-auths', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { page = 1, pageSize = 20, userId, resourceCode, status } = req.query;
@@ -272,6 +321,14 @@ router.post('/auth-requests/:id/approve', authMiddleware, async (req: Request, r
       });
     }
 
+    const canApprove = await canApproveNode(req.user!.userId, authRequest.currentNodeId);
+    if (!canApprove.allowed) {
+      return res.status(403).json({
+        success: false,
+        message: canApprove.reason || '您没有权限审批此申请'
+      });
+    }
+
     const existingRecord = await prisma.approvalRecord.findFirst({
       where: {
         nodeId: authRequest.currentNodeId,
@@ -443,6 +500,14 @@ router.post('/temp-auths/:id/approve', authMiddleware, async (req: Request, res:
       return res.status(400).json({
         success: false,
         message: '该临时授权已被拒绝'
+      });
+    }
+
+    const canApprove = await canApproveNode(req.user!.userId, tempAuth.currentNodeId);
+    if (!canApprove.allowed) {
+      return res.status(403).json({
+        success: false,
+        message: canApprove.reason || '您没有权限审批此申请'
       });
     }
 

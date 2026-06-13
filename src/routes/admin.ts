@@ -1,11 +1,13 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, roleMiddleware } from '../middleware/auth';
 import { batchPermissionSchema } from '../validators';
 
 const router = Router();
 
-router.post('/departments/batch-permissions', authMiddleware, async (req: Request, res: Response) => {
+const adminOnly = roleMiddleware('admin');
+
+router.post('/departments/batch-permissions', authMiddleware, adminOnly, async (req: Request, res: Response) => {
   try {
     const data = batchPermissionSchema.parse(req.body);
     
